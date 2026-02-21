@@ -146,8 +146,11 @@ function StarGlobe({ constellations, stars, projScale }) {
       ctx.clearRect(0,0,W,H);
 
       const cx=mouse.current.x-0.5, cy=mouse.current.y-0.5, md=Math.sqrt(cx*cx+cy*cy);
-      if(md>0.05){ vel.x+=((cy/md)*0.0018-vel.x)*0.07; vel.y+=((cx/md)*0.0018-vel.y)*0.07; }
-      else        { vel.x+=(AUTO.x-vel.x)*0.025;        vel.y+=(AUTO.y-vel.y)*0.025; }
+      const isMob = W < 640;
+      const velMult = isMob ? 0.0032 : 0.0018;
+      const velSmooth = isMob ? 0.10 : 0.07;
+      if(md>0.05){ vel.x+=((cy/md)*velMult-vel.x)*velSmooth; vel.y+=((cx/md)*velMult-vel.y)*velSmooth; }
+      else        { vel.x+=(AUTO.x-vel.x)*0.025;              vel.y+=(AUTO.y-vel.y)*0.025; }
       rot.x+=vel.x; rot.y+=vel.y;
 
       const mxPx=mouse.current.x*W, myPx=mouse.current.y*H, sc=scaleRef.current;
@@ -242,7 +245,8 @@ function StarGlobe({ constellations, stars, projScale }) {
 
         // If near an active node, draw boosted bv-coloured glow first (underneath the dot)
         if(nodeH > 0){
-          const boostR = Math.max(r*12, (7 - s.mag*0.5) * (1+nodePulse*0.6) * nodeH * p.alpha);
+          const isMobile = W < 640;
+          const boostR = Math.max(r * (isMobile ? 7 : 12), (isMobile ? 4.5 : 7 - s.mag*0.5) * (1+nodePulse*0.6) * nodeH * p.alpha);
           const boostAl = nodeH * (0.85 + 0.4*nodePulse) * p.alpha;
           const bgrd = ctx.createRadialGradient(p.x,p.y,0, p.x,p.y,boostR);
           bgrd.addColorStop(0, `rgba(${s.cr},${s.cg},${s.cb},${boostAl})`);
@@ -653,6 +657,26 @@ export default function Hero() {
         .hero-nav-link { color:rgba(175,200,252,0.4); text-decoration:none; font-family:'Gotham Rounded','Nunito','Inter',sans-serif; font-size:15px; font-weight:400; letter-spacing:0.1em; text-transform:lowercase; transition:color 0.25s ease; }
         .hero-nav-link:hover { color:rgba(175,200,252,0.85); }
         @keyframes fadeInUp { from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);} }
+        @media (max-width: 640px) {
+          .hero-text-block {
+            top: clamp(32px, 8vw, 56px) !important;
+            left: 50% !important;
+            transform: translateX(-50%) !important;
+            align-items: center !important;
+            flex-direction: column-reverse !important;
+            gap: 10px !important;
+          }
+          .hero-text-block h1 {
+            text-align: center !important;
+            font-size: clamp(44px, 12vw, 80px) !important;
+          }
+          .hero-text-block nav { justify-content: center; }
+          .blur-layer-desktop { display: none !important; }
+          .blur-layer-mobile { display: block !important; }
+        }
+        @media (min-width: 641px) {
+          .blur-layer-mobile { display: none !important; }
+        }
       `}</style>
 
       <div ref={overlayRef} style={{position:"fixed",inset:0,zIndex:9999,backgroundColor:"#000",pointerEvents:"none"}}/>
@@ -678,14 +702,14 @@ export default function Hero() {
           // [blur, horizontal reach, vertical mask]
           // horizontal reach: how far right the blur extends (as % of viewport width)
           // vertical mask: where blur is opaque — wider strip for stronger layers
-          { blur:"1px",  w:"18%", vmask:"ellipse 100% 90% at 0% 50%" },
-          { blur:"3px",  w:"22%", vmask:"ellipse 100% 78% at 0% 50%" },
-          { blur:"6px",  w:"26%", vmask:"ellipse 100% 66% at 0% 50%" },
-          { blur:"10px", w:"30%", vmask:"ellipse 100% 54% at 0% 50%" },
-          { blur:"16px", w:"32%", vmask:"ellipse 100% 42% at 0% 50%" },
-          { blur:"24px", w:"34%", vmask:"ellipse 100% 32% at 0% 50%" },
+          { blur:"2px",  w:"20%", vmask:"ellipse 100% 92% at 0% 50%" },
+          { blur:"6px",  w:"26%", vmask:"ellipse 100% 80% at 0% 50%" },
+          { blur:"14px", w:"32%", vmask:"ellipse 100% 68% at 0% 50%" },
+          { blur:"28px", w:"38%", vmask:"ellipse 100% 56% at 0% 50%" },
+          { blur:"48px", w:"43%", vmask:"ellipse 100% 44% at 0% 50%" },
+          { blur:"72px", w:"48%", vmask:"ellipse 100% 34% at 0% 50%" },
         ].map(({ blur, w, vmask }, i) => (
-          <div key={i} style={{
+          <div key={i} className="blur-layer-desktop" style={{
             position:"absolute", top:0, left:0,
             width: w, height:"100%",
             zIndex: 10,
@@ -701,13 +725,37 @@ export default function Hero() {
           }}/>
         ))}
 
-        <div style={{
+        {/* Mobile blur — top band, widest horizontally in centre */}
+        {[
+          { blur:"2px",  h:"18%", hmask:"ellipse 90% 100% at 50% 0%" },
+          { blur:"6px",  h:"24%", hmask:"ellipse 78% 100% at 50% 0%" },
+          { blur:"14px", h:"30%", hmask:"ellipse 66% 100% at 50% 0%" },
+          { blur:"28px", h:"36%", hmask:"ellipse 54% 100% at 50% 0%" },
+          { blur:"48px", h:"40%", hmask:"ellipse 44% 100% at 50% 0%" },
+          { blur:"72px", h:"44%", hmask:"ellipse 36% 100% at 50% 0%" },
+        ].map(({ blur, h, hmask }, i) => (
+          <div key={`m${i}`} className="blur-layer-mobile" style={{
+            position:"absolute", top:0, left:0,
+            width:"100%", height: h,
+            zIndex: 10,
+            pointerEvents:"none",
+            backdropFilter:`blur(${blur}) brightness(1.15)`,
+            WebkitBackdropFilter:`blur(${blur}) brightness(1.15)`,
+            maskImage:`radial-gradient(${hmask}, black 0%, black 40%, transparent 100%), linear-gradient(to bottom, black 30%, transparent 100%)`,
+            WebkitMaskImage:`radial-gradient(${hmask}, black 0%, black 40%, transparent 100%), linear-gradient(to bottom, black 30%, transparent 100%)`,
+            maskComposite:"intersect",
+            WebkitMaskComposite:"destination-in",
+          }}/>
+        ))}
+
+        <div className="hero-text-block" style={{
           position:"absolute", top:"50%",
           left:      heroSettled ? "clamp(28px, 5vw, 64px)" : "50%",
           transform: heroSettled ? "translateY(-50%)" : "translate(-50%, -50%)",
           zIndex:20, display:"flex", flexDirection:"column", gap:"14px",
           transition: heroSettled ? "none" : "left 0.8s cubic-bezier(0.7,0,0.3,1), transform 0.8s cubic-bezier(0.7,0,0.3,1)",
           pointerEvents: heroSettled ? "auto" : "none",
+          // mobile overrides applied via className below
         }}>
           <nav style={{display:"flex",gap:"clamp(20px, 3vw, 36px)",alignItems:"center",opacity:navVisible?1:0,transition:"opacity 0.6s ease 0.1s"}}>
             {["about","portfolio","blog","contact"].map((label,i)=>(
