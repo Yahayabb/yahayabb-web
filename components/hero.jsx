@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";           // ← added
 
 const TEXT = "yahayabb";
 const FONT = "'Proxima Nova', 'Montserrat', 'Helvetica Neue', Helvetica, Arial, sans-serif";
@@ -390,31 +391,6 @@ function StarGlobe({ constellations, stars, projScale }) {
   return <canvas ref={canvasRef} style={{position:"absolute",inset:0,width:"100%",height:"100%",zIndex:0}}/>;
 }
 
-function GridDistortion() {
-  const canvasRef=useRef(null), mouse=useRef({x:0.5,y:0.5}), lagged=useRef({x:0.5,y:0.5}), animRef=useRef(null);
-  useEffect(()=>{
-    const canvas=canvasRef.current, ctx=canvas.getContext("2d"); let W,H; const G=18;
-    const onMove=e=>{const pt=e.touches?e.touches[0]:e; mouse.current={x:pt.clientX/W,y:pt.clientY/H};};
-    const resize=()=>{W=canvas.width=window.innerWidth; H=canvas.height=window.innerHeight;};
-    const draw=()=>{
-      ctx.clearRect(0,0,W,H);
-      lagged.current.x+=(mouse.current.x-lagged.current.x)*0.025;
-      lagged.current.y+=(mouse.current.y-lagged.current.y)*0.025;
-      const mx=lagged.current.x*W, my=lagged.current.y*H;
-      ctx.strokeStyle="rgba(90,130,255,0.04)"; ctx.lineWidth=1;
-      const cols=Math.ceil(W/G)+1, rows=Math.ceil(H/G)+1;
-      const wp=(gx,gy)=>{const wx=gx*G,wy=gy*G,dx=wx-mx,dy=wy-my,d=Math.sqrt(dx*dx+dy*dy); if(d<130&&d>0){const s=(1-d/130)*28;return[wx+(dx/d)*s,wy+(dy/d)*s];} return[wx,wy];};
-      for(let r=0;r<rows;r++){ctx.beginPath();for(let c=0;c<cols;c++){const[x,y]=wp(c,r);c===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}ctx.stroke();}
-      for(let c=0;c<cols;c++){ctx.beginPath();for(let r=0;r<rows;r++){const[x,y]=wp(c,r);r===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}ctx.stroke();}
-      animRef.current=requestAnimationFrame(draw);
-    };
-    resize(); draw();
-    window.addEventListener("resize",resize); window.addEventListener("mousemove",onMove); window.addEventListener("touchmove",onMove,{passive:true});
-    return()=>{cancelAnimationFrame(animRef.current); window.removeEventListener("resize",resize); window.removeEventListener("mousemove",onMove); window.removeEventListener("touchmove",onMove);};
-  },[]);
-  return <canvas ref={canvasRef} style={{position:"absolute",inset:0,width:"100%",height:"100%",zIndex:1}}/>;
-}
-
 const LS_START = 100;
 const LS_END   =   2;
 const SC_START = 1.5;
@@ -683,7 +659,6 @@ export default function Hero() {
 
       <section style={{position:"relative",width:"100%",height:"100vh",background:"radial-gradient(ellipse at 44% 46%, #060918 0%, #020407 100%)",overflow:"hidden"}}>
         <StarGlobe constellations={constellations} stars={stars} projScale={projScale} />
-        <GridDistortion />
 
         {/* Gradual blur — left side, bulges widest at vertical centre where text lives.
             Each layer is a pure backdrop-filter with NO background colour.
@@ -725,7 +700,7 @@ export default function Hero() {
           { blur:"48px", h:"40%", hmask:"ellipse 44% 100% at 50% 0%" },
           { blur:"72px", h:"44%", hmask:"ellipse 36% 100% at 50% 0%" },
         ].map(({ blur, h, hmask }, i) => (
-          <div key={`m${i}`} className="blur-layer-mobile" style={{
+          <div key={"m"+i} className="blur-layer-mobile" style={{
             position:"absolute", top:0, left:0,
             width:"100%", height: h,
             zIndex: 10,
@@ -763,8 +738,8 @@ export default function Hero() {
 
           <nav style={{display:"flex",gap:"clamp(20px, 3vw, 36px)",alignItems:"center",opacity:navVisible?1:0,transition:"opacity 0.6s ease 0.1s"}}>
             {["about","portfolio","blog","contact"].map((label,i)=>(
-              <a key={label} href={`#${label}`} className="hero-nav-link"
-                style={{animation:navVisible?`fadeInUp 0.6s ease ${i*60+80}ms both`:"none"}}>{label}</a>
+                <Link key={label} href={`/${label}`} className="hero-nav-link"
+                style={{animation:navVisible?`fadeInUp 0.6s ease ${i*60+80}ms both`:"none"}}>{label}</Link>
             ))}
           </nav>
         </div>
