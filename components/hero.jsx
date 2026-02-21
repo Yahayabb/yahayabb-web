@@ -15,7 +15,7 @@ function rotY(v, a) {
   const c = Math.cos(a), s = Math.sin(a);
   return { x: c*v.x + s*v.z, y: v.y, z: -s*v.x + c*v.z };
 }
-function projectFlat(v, W, H, scale) {
+function projectSphere(v, W, H, scale) {
   const sc = Math.min(W, H) * (scale ?? 0.95);
   return {
     x: W/2 + v.x * sc,
@@ -25,6 +25,9 @@ function projectFlat(v, W, H, scale) {
     alpha: Math.max(0, v.z),
   };
 }
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2;
+}
 
 // ── d3-celestial coordinate conversion ───────────────────────────────────────
 function lonLatToRaDec([lon, lat]) {
@@ -33,9 +36,59 @@ function lonLatToRaDec([lon, lat]) {
   return [ra, lat];
 }
 
+// ── B-V colour index → RGB ────────────────────────────────────────────────────
+// Based on Ballesteros (2012) formula, clamped to visible star range.
+// bv: typically -0.4 (blue-white O/B) → +2.0 (deep red M-type)
+function bvToRgb(bv) {
+  const t = Math.max(-0.4, Math.min(2.0, bv));
+  let r, g, b;
+
+  // Red channel
+  if      (t < 0.40) r = 0.61 + 0.11*t + 0.1*t*t;
+  else if (t < 1.50) r = 0.83 + (0.17*(t-0.40))/(1.50-0.40);
+  else               r = 1.00;
+  r = Math.min(1, Math.max(0, r));
+
+  // Green channel
+  if      (t < 0.00) g = 0.70 + 0.07*t + 1.1*t*t;
+  else if (t < 0.40) g = 0.87 + 0.54*t - 0.93*t*t;
+  else if (t < 1.60) g = 0.97 - 0.26*(t-0.40)/(1.60-0.40);
+  else               g = Math.max(0, 0.74 - (t-1.60));
+  g = Math.min(1, Math.max(0, g));
+
+  // Blue channel
+  if      (t < 0.40) b = 1.00;
+  else if (t < 1.50) b = Math.max(0, 1.00 - (t-0.40)/(1.50-0.40));
+  else               b = 0.00;
+  b = Math.min(1, Math.max(0, b));
+
+  return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
+}
+
 // ── Data fetching ─────────────────────────────────────────────────────────────
 const LINES_URL = "https://cdn.jsdelivr.net/gh/ofrohn/d3-celestial@master/data/constellations.lines.json";
 const NAMES_URL = "https://cdn.jsdelivr.net/gh/ofrohn/d3-celestial@master/data/constellations.json";
+const STARS_URL = "https://cdn.jsdelivr.net/gh/ofrohn/d3-celestial@master/data/stars.6.json";
+
+async function loadStars() {
+  const res  = await fetch(STARS_URL);
+  const data = await res.json();
+  return data.features.map(f => {
+    const [lon, lat] = f.geometry.coordinates;
+    let ra = -lon; if (ra < 0) ra += 360;
+    const dec = lat;
+    const mag = f.properties.mag;
+    const bv  = f.properties.bv ?? 0.6; // fallback to sun-like if missing
+    const [cr, cg, cb] = bvToRgb(bv);
+    return {
+      xyz: raDecToXYZ(ra, dec),
+      mag,
+      cr, cg, cb,
+      twinklePhase: Math.random() * Math.PI * 2,
+      twinkleSpeed: 0.008 + Math.random() * 0.014,
+    };
+  });
+}
 
 async function loadConstellations() {
   const [linesRes, namesRes] = await Promise.all([fetch(LINES_URL), fetch(NAMES_URL)]);
@@ -51,7 +104,7 @@ async function loadConstellations() {
   }
 
   return linesGeo.features.map(f => {
-    const id = f.id; // e.g. "Ori", "UMa" — the IAU 3-letter code
+    const id = f.id;
     const segments = f.geometry.coordinates.map(line =>
       line.map(([lon, lat]) => {
         const [ra, dec] = lonLatToRaDec([lon, lat]);
@@ -64,15 +117,17 @@ async function loadConstellations() {
 }
 
 // ── Canvas renderer ───────────────────────────────────────────────────────────
-function StarGlobe({ constellations, projScale }) {
+function StarGlobe({ constellations, stars, projScale }) {
   const canvasRef = useRef(null);
   const mouse     = useRef({ x: 0.5, y: 0.5 });
   const animRef   = useRef(null);
   const consRef   = useRef(constellations);
+  const starsRef  = useRef(stars);
   const scaleRef  = useRef(projScale);
 
-  useEffect(() => { consRef.current = constellations; }, [constellations]);
-  useEffect(() => { scaleRef.current = projScale; }, [projScale]);
+  useEffect(() => { consRef.current  = constellations; }, [constellations]);
+  useEffect(() => { starsRef.current = stars;          }, [stars]);
+  useEffect(() => { scaleRef.current = projScale;      }, [projScale]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -82,17 +137,6 @@ function StarGlobe({ constellations, projScale }) {
     const rot  = { x: 0.15, y: 0.0 };
     const vel  = { x: 0.0,  y: 0.0 };
     const AUTO = { x: -0.00045, y: 0.001 };
-
-    const bgStars = Array.from({ length: 700 }, () => {
-      const ra  = Math.random() * 360;
-      const dec = (Math.asin(Math.random() * 2 - 1) * 180) / Math.PI;
-      return {
-        xyz: raDecToXYZ(ra, dec),
-        mag: 2.5 + Math.random() * 2.8,
-        twinklePhase: Math.random() * Math.PI * 2,
-        twinkleSpeed: 0.01 + Math.random() * 0.018,
-      };
-    });
 
     const onMove = e => {
       const pt = e.touches ? e.touches[0] : e;
@@ -107,7 +151,7 @@ function StarGlobe({ constellations, projScale }) {
       const cy = mouse.current.y - 0.5;
       const md = Math.sqrt(cx*cx + cy*cy);
       if (md > 0.05) {
-        vel.x += ((-cy/md)*0.0018 - vel.x)*0.07;
+        vel.x += (( cy/md)*0.0018 - vel.x)*0.07;
         vel.y += (( cx/md)*0.0018 - vel.y)*0.07;
       } else {
         vel.x += (AUTO.x - vel.x)*0.025;
@@ -122,20 +166,35 @@ function StarGlobe({ constellations, projScale }) {
       const rp = xyz => {
         let v = rotX(xyz, rot.x);
         v = rotY(v, rot.y);
-        return projectFlat(v, W, H, sc);
+        return projectSphere(v, W, H, sc);
       };
 
-      // Background stars
-      for (const s of bgStars) {
+      // ── Real Hipparcos stars with accurate colour + size ──────────────────
+      // mag: apparent magnitude (lower = brighter, Sirius = -1.46, limit = 6)
+      // size: brighter stars get larger radii, scaled by horizon alpha
+      // colour: from B-V index via bvToRgb — blue giants → white → yellow → red
+      for (const s of (starsRef.current ?? [])) {
         s.twinklePhase += s.twinkleSpeed;
         const p = rp(s.xyz);
         if (!p.visible) continue;
-        const brightness = Math.max(0, 5.2 - s.mag);
-        const twinkle = 0.8 + 0.2 * Math.sin(s.twinklePhase);
-        const r  = Math.max(0.25, (0.3 + brightness*0.4)*twinkle*p.alpha);
-        const al = Math.min(1, (0.1 + brightness*0.1)*p.alpha);
-        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI*2);
-        ctx.fillStyle = `rgba(210,225,255,${al})`; ctx.fill();
+        const twinkle   = 0.88 + 0.12 * Math.sin(s.twinklePhase);
+        // Radius: magnitude 6 → ~0.4px, magnitude -1.5 → ~3.5px
+        const r  = Math.max(0.3, (3.8 - s.mag * 0.52) * twinkle * p.alpha);
+        // Opacity: bright stars more opaque; faint ones wispy
+        const al = Math.min(0.95, Math.max(0.05, (7 - s.mag) / 9) * p.alpha);
+        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${s.cr},${s.cg},${s.cb},${al})`;
+        ctx.fill();
+
+        // Glow halo for bright stars (mag < 2)
+        if (s.mag < 2 && p.alpha > 0.3) {
+          const gr  = r * 4;
+          const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, gr);
+          grd.addColorStop(0, `rgba(${s.cr},${s.cg},${s.cb},${al * 0.35})`);
+          grd.addColorStop(1, `rgba(${s.cr},${s.cg},${s.cb},0)`);
+          ctx.beginPath(); ctx.arc(p.x, p.y, gr, 0, Math.PI * 2);
+          ctx.fillStyle = grd; ctx.fill();
+        }
       }
 
       const cons = consRef.current;
@@ -182,13 +241,12 @@ function StarGlobe({ constellations, projScale }) {
         }
       }
 
-      // ── Labels: IAU 3-letter codes, modern light font ─────────────────────
+      // Labels
       if (sc > 0.5) {
         ctx.save();
         ctx.textAlign = "center";
         ctx.textBaseline = "bottom";
-        // Inter 300 — clean, modern, legible
-        ctx.font = "300 11px 'Inter', 'Helvetica Neue', sans-serif";
+        ctx.font = "300 16px 'Inter', 'Helvetica Neue', sans-serif";
         const labelOpacity = Math.min(1, (sc - 0.5) / 0.35);
 
         for (const con of cons) {
@@ -205,11 +263,8 @@ function StarGlobe({ constellations, projScale }) {
 
           const fadeA = Math.min(1, labelP.alpha * 1.6) * labelOpacity;
           const yPos  = labelP.y - 7;
-
-          // Subtle glow
           ctx.shadowColor = `rgba(100,150,255,${fadeA * 0.5})`;
           ctx.shadowBlur  = 8;
-          // Use the IAU 3-letter id directly
           ctx.fillStyle   = `rgba(180,205,255,${fadeA * 0.48})`;
           ctx.fillText(con.id, labelP.x, yPos);
           ctx.shadowBlur  = 0;
@@ -283,74 +338,20 @@ function GridDistortion() {
   return <canvas ref={canvasRef} style={{ position:"absolute", inset:0, width:"100%", height:"100%", zIndex:1 }} />;
 }
 
-// ── Edge blur on all four sides ───────────────────────────────────────────────
-function EdgeBlur() {
-  const layers  = 8;
-  const maxBlur = 12;
-  const size    = "26%";
-
-  const blurLayers = Array.from({ length: layers }, (_, i) => {
-    const t = i / (layers - 1);
-    return { blur: t * t * maxBlur, opacity: t * 0.88 };
-  });
-
-  const sides = [
-    { key:"t", pos:{ top:0,left:0,right:0,height:size }, dir:"to bottom"  },
-    { key:"b", pos:{ bottom:0,left:0,right:0,height:size }, dir:"to top"   },
-    { key:"l", pos:{ top:0,left:0,bottom:0,width:size },  dir:"to right"  },
-    { key:"r", pos:{ top:0,right:0,bottom:0,width:size }, dir:"to left"   },
-  ];
-
-  return (
-    <>
-      {/* Hard gradient masks */}
-      {sides.map(({ key, pos, dir }) => (
-        <div key={key} style={{
-          position:"absolute", ...pos, zIndex:5, pointerEvents:"none",
-          background:`linear-gradient(${dir}, rgba(2,4,7,0.92) 0%, transparent 100%)`,
-        }} />
-      ))}
-      {/* Progressive blur layers per side */}
-      {sides.map(({ key, pos, dir }) =>
-        blurLayers.map(({ blur, opacity }, i) => (
-          <div key={`${key}-${i}`} style={{
-            position:"absolute", ...pos,
-            backdropFilter:`blur(${blur}px)`,
-            WebkitBackdropFilter:`blur(${blur}px)`,
-            maskImage:`linear-gradient(${dir}, black 0%, transparent 100%)`,
-            WebkitMaskImage:`linear-gradient(${dir}, black 0%, transparent 100%)`,
-            opacity, zIndex:4, pointerEvents:"none",
-          }} />
-        ))
-      )}
-    </>
-  );
-}
-
-// ── Easing ────────────────────────────────────────────────────────────────────
-function easeInOutCubic(t) {
-  return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2;
-}
-
 // ── Hero ──────────────────────────────────────────────────────────────────────
-// Sequence (mirrors chronark.com):
-//   0.0s  — name fades in, centered, full screen
-//   1.8s  — name slides to bottom-left, nav fades in above it, zoom begins
-//   4.0s  — zoom complete, interactive
 export default function Hero() {
   const [constellations, setConstellations] = useState([]);
+  const [stars,          setStars         ] = useState([]);
   const [projScale, setProjScale] = useState(0.28);
-  // "intro" = name centered | "settling" = name moving to corner + zoom | "done"
   const [phase, setPhase] = useState("intro");
   const animFrameRef = useRef(null);
 
   useEffect(() => {
     loadConstellations().then(setConstellations).catch(console.error);
+    loadStars().then(setStars).catch(console.error);
   }, []);
 
-  // ── Animation sequence ────────────────────────────────────────────────────
   useEffect(() => {
-    // After 1.8s, transition to settled layout + start zoom
     const t1 = setTimeout(() => {
       setPhase("settling");
 
@@ -383,17 +384,17 @@ export default function Hero() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400&family=Montserrat:wght@700&family=Nunito:wght@400;600&display=swap');
 
         *, *::before, *::after { box-sizing: border-box; }
 
         .hero-nav-link {
           color: rgba(175,200,252,0.4);
           text-decoration: none;
-          font-family: 'Inter', sans-serif;
-          font-size: 11px;
-          font-weight: 300;
-          letter-spacing: 0.14em;
+          font-family: 'Gotham Rounded', 'Nunito', 'Inter', sans-serif;
+          font-size: 12px;
+          font-weight: 400;
+          letter-spacing: 0.1em;
           text-transform: lowercase;
           transition: color 0.25s ease;
         }
@@ -416,50 +417,28 @@ export default function Hero() {
         background:"radial-gradient(ellipse at 44% 46%, #060918 0%, #020407 100%)",
         overflow:"hidden",
       }}>
-        <StarGlobe constellations={constellations} projScale={projScale} />
+        <StarGlobe constellations={constellations} stars={stars} projScale={projScale} />
         <GridDistortion />
-        <EdgeBlur />
 
-        {/* ── Centered intro state: large name only ── */}
-        <div style={{
-          position:"absolute", inset:0, zIndex:20,
-          display:"flex", alignItems:"center", justifyContent:"center",
-          // Fade out and shrink away as we transition
-          opacity:    isIntro ? 1 : 0,
-          transform:  isIntro ? "scale(1)" : "scale(0.96)",
-          transition: "opacity 0.7s ease, transform 0.7s ease",
-          pointerEvents:"none",
-        }}>
-          <h1 style={{
-            fontFamily:"'Inter', sans-serif",
-            fontWeight:300,
-            fontSize:"clamp(28px, 4vw, 52px)",
-            color:"rgba(210,225,252,0.82)",
-            letterSpacing:"0.22em",
-            textTransform:"lowercase",
-            margin:0,
-            animation:"fadeInOnly 1.1s ease both",
-          }}>
-            yahayabb
-          </h1>
-        </div>
-
-        {/* ── Settled UI: nav above name, bottom-left ── */}
+        {/* ── Nav (above) + Title (below) as one left-middle unit ── */}
         <div style={{
           position:"absolute",
-          bottom:"clamp(28px, 5vh, 52px)",
-          left:"clamp(28px, 4vw, 52px)",
-          zIndex:10,
+          top:"50%",
+          left: isSettling ? "clamp(28px, 5vw, 64px)" : "50%",
+          transform: isSettling ? "translateY(-50%)" : "translate(-50%, -50%)",
+          zIndex:20,
           display:"flex",
           flexDirection:"column",
-          gap:"16px",
-          opacity:    isSettling ? 1 : 0,
-          transform:  isSettling ? "translateY(0)" : "translateY(16px)",
-          transition: "opacity 0.75s ease 0.1s, transform 0.75s ease 0.1s",
+          gap:"14px",
+          transition:"left 0.8s cubic-bezier(0.7,0,0.3,1), transform 0.8s cubic-bezier(0.7,0,0.3,1)",
           pointerEvents: isSettling ? "auto" : "none",
         }}>
-          {/* Nav links above the title */}
-          <nav style={{ display:"flex", gap:"clamp(16px, 2.5vw, 28px)", alignItems:"center" }}>
+          {/* Nav above — fades in after intro */}
+          <nav style={{
+            display:"flex", gap:"clamp(16px, 2.5vw, 28px)", alignItems:"center",
+            opacity: isSettling ? 1 : 0,
+            transition: "opacity 0.6s ease 0.2s",
+          }}>
             {["about","portfolio","blog","contact"].map((label, i) => (
               <a
                 key={label}
@@ -474,17 +453,19 @@ export default function Hero() {
             ))}
           </nav>
 
-          {/* Title */}
+          {/* Title — always visible */}
           <h1 style={{
-            fontFamily:"'Inter', sans-serif",
-            fontWeight:300,
+            fontFamily:"'Proxima Nova', 'Montserrat', 'Inter', sans-serif",
+            fontWeight:700,
             fontSize:"clamp(32px, 5vw, 64px)",
             color:"rgba(210,225,252,0.88)",
             letterSpacing:"0.04em",
             textTransform:"lowercase",
             margin:0,
             lineHeight:1,
-            animation: isSettling ? "fadeInUp 0.7s ease 0.05s both" : "none",
+            whiteSpace:"nowrap",
+            animation:"fadeInOnly 1.1s ease both",
+            pointerEvents:"none",
           }}>
             yahayabb
           </h1>
@@ -493,13 +474,3 @@ export default function Hero() {
     </>
   );
 }
-
-// todo:
-// 1. increase constellation font size
-// 2. animate the text to be in the leftern-ish middle, add gradual blur as the background of the text. 
-// 3. keep the splash screen animation in the middle, add lines, and adjust the timing (what shows up first, what shows up when)
-// 4. change the font, font size and spacing to chronoark's. 
-// 5. increase responsiveness, zoom in even more, and increase the brightness of the background slighly
-// 6. add something to make it more interactive
-// 7. add a view counter
-// 8. make the projection 2d instead of 3d sphere
