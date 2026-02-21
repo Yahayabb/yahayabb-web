@@ -593,6 +593,8 @@ export default function Hero() {
       if (!targetEl) { setTextPhase("hero"); return; }
 
       function waitForSettle() {
+        const isMobile = window.innerWidth < 640;
+        if (isMobile) { doTravel(); return; } // mobile is always centered, skip check
         const r = targetEl.getBoundingClientRect();
         if (Math.abs(r.left + r.width / 2 - window.innerWidth / 2) < 5) {
           rafRef.current = requestAnimationFrame(waitForSettle); return;
@@ -657,25 +659,14 @@ export default function Hero() {
         .hero-nav-link { color:rgba(175,200,252,0.4); text-decoration:none; font-family:'Gotham Rounded','Nunito','Inter',sans-serif; font-size:15px; font-weight:400; letter-spacing:0.1em; text-transform:lowercase; transition:color 0.25s ease; }
         .hero-nav-link:hover { color:rgba(175,200,252,0.85); }
         @keyframes fadeInUp { from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);} }
-        @media (max-width: 640px) {
-          .hero-text-block {
-            top: clamp(32px, 8vw, 56px) !important;
-            left: 50% !important;
-            transform: translateX(-50%) !important;
-            align-items: center !important;
-            flex-direction: column-reverse !important;
-            gap: 10px !important;
-          }
-          .hero-text-block h1 {
-            text-align: center !important;
-            font-size: clamp(44px, 12vw, 80px) !important;
-          }
-          .hero-text-block nav { justify-content: center; }
-          .blur-layer-desktop { display: none !important; }
-          .blur-layer-mobile { display: block !important; }
-        }
         @media (min-width: 641px) {
+          .hero-text-block nav { order: -1; }
           .blur-layer-mobile { display: none !important; }
+        }
+        @media (max-width: 640px) {
+          .hero-text-block h1  { font-size: clamp(44px, 12vw, 80px) !important; text-align: center; min-width: 100%; }
+          .hero-text-block nav { justify-content: center; }
+          .blur-layer-desktop  { display: none !important; }
         }
       `}</style>
 
@@ -749,31 +740,33 @@ export default function Hero() {
         ))}
 
         <div className="hero-text-block" style={{
-          position:"absolute", top:"50%",
-          left:      heroSettled ? "clamp(28px, 5vw, 64px)" : "50%",
-          transform: heroSettled ? "translateY(-50%)" : "translate(-50%, -50%)",
+          position:"absolute",
+          top:      heroSettled ? (window.innerWidth < 640 ? "clamp(32px, 8vw, 56px)" : "50%") : "50%",
+          left:     heroSettled ? (window.innerWidth < 640 ? "50%"                     : "clamp(28px, 5vw, 64px)") : "50%",
+          transform:heroSettled ? (window.innerWidth < 640 ? "translateX(-50%)"        : "translateY(-50%)") : "translate(-50%, -50%)",
           zIndex:20, display:"flex", flexDirection:"column", gap:"14px",
+          alignItems: heroSettled && window.innerWidth < 640 ? "center" : "stretch",
           transition: heroSettled ? "none" : "left 0.8s cubic-bezier(0.7,0,0.3,1), transform 0.8s cubic-bezier(0.7,0,0.3,1)",
           pointerEvents: heroSettled ? "auto" : "none",
-          // mobile overrides applied via className below
         }}>
+          <h1 ref={placeholderRef} style={{
+            fontFamily: FONT, fontWeight:700,
+            fontSize:"clamp(32px, 5vw, 64px)",
+            letterSpacing:"0.04em", textTransform:"lowercase",
+            margin:0, lineHeight:1, whiteSpace:"nowrap",
+            minWidth:"100%",
+            userSelect:"none", pointerEvents:"none",
+            color: isHero ? "rgba(210,225,252,0.88)" : "transparent",
+          }}>
+            {TEXT}
+          </h1>
+
           <nav style={{display:"flex",gap:"clamp(20px, 3vw, 36px)",alignItems:"center",opacity:navVisible?1:0,transition:"opacity 0.6s ease 0.1s"}}>
             {["about","portfolio","blog","contact"].map((label,i)=>(
               <a key={label} href={`#${label}`} className="hero-nav-link"
                 style={{animation:navVisible?`fadeInUp 0.6s ease ${i*60+80}ms both`:"none"}}>{label}</a>
             ))}
           </nav>
-
-          <h1 ref={placeholderRef} style={{
-            fontFamily: FONT, fontWeight:700,
-            fontSize:"clamp(32px, 5vw, 64px)",
-            letterSpacing:"0.04em", textTransform:"lowercase",
-            margin:0, lineHeight:1, whiteSpace:"nowrap",
-            userSelect:"none", pointerEvents:"none",
-            color: isHero ? "rgba(210,225,252,0.88)" : "transparent",
-          }}>
-            {TEXT}
-          </h1>
         </div>
       </section>
     </>
