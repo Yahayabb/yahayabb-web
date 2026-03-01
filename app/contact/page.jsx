@@ -160,7 +160,7 @@ function Particles() {
 // ── Page ─────────────────────────────────────────────────────────────────────
 const CONTACTS = [
   { href: "https://www.instagram.com/yahayabasiron/", handle: "@yahayabasiron", platform: "Instagram", Icon: InstagramIcon, colors: "#d946ef,#f0abfc,#e879f9" },
-  { href: "mailto:yahaya@gmail.com",                  handle: "yahaya@gmail.com", platform: "Email",    Icon: EmailIcon,     colors: "#6366f1,#a5b4fc,#c7d2fe" },
+  { href: "mailto:ybasiron6@gmail.com",                  handle: "ybasiron6@gmail.com", platform: "Email",    Icon: EmailIcon,     colors: "#6366f1,#a5b4fc,#c7d2fe" },
   { href: "https://www.linkedin.com/in/yahayabasiron/", handle: "yahayabasiron", platform: "LinkedIn", Icon: LinkedInIcon,  colors: "#38bdf8,#7dd3fc,#bae6fd" },
   { href: "https://github.com/Yahayabb",              handle: "Yahayabb",         platform: "GitHub",   Icon: GitHubIcon,    colors: "#a1a1aa,#d4d4d8,#f4f4f5" },
 ];
